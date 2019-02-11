@@ -1,0 +1,96 @@
+
+import org.w3.banana.jena.JenaModule
+import scala.util._
+import java.net.URL
+import org.w3.banana._, io._, binder._, jena._
+import scala.concurrent._
+import scala.util.{Try, Success, Failure}
+
+case class Field[A,B] (ls:List[(A,B)]) extends Function1[A, B] { 
+
+  def this (vals:(A,B)*){
+      this(vals.toList)
+  }
+  val _map = ls.toMap
+  def apply(x:A) = _map(x)
+}
+
+
+case class STriple[A,B,C] (sub:A, pred:B, obj:C) 
+
+class Triples[A,B,C] (t:(A,B,C)*) {
+  val triples = t.toList.map((v)=> v match { case (x,y,z) => STriple(x,y,z)})
+
+
+  def groupBySubj () : Map[A,Field[B,C]] = {
+    val m = triples.groupBy(_.sub)
+    m map {case (key,value) => (key,Field (value map ( (x)=>(x.pred,x.obj) )))}
+  }
+
+
+  def groupByPred () : Map[B,Field[A,C]] = {
+    val m = triples.groupBy(_.pred)
+    m map {case (key,value) => (key,Field (value map ( (x)=>(x.sub,x.obj) )))}
+  }
+}
+
+
+trait SPARQLExampleDependencies
+  extends RDFModule
+  with RDFOpsModule
+  with SparqlOpsModule
+  with SparqlHttpModule
+
+trait SPARQLExample extends SPARQLExampleDependencies { self =>
+
+  import ops._
+  import sparqlOps._
+  import sparqlHttp.sparqlEngineSyntax._
+
+def main(args: Array[String]): Unit = {
+
+    /* gets a SparqlEngine out of a Sparql endpoint */
+
+    val endpoint = new URL("http://dbcells.org:3030/dbcells")
+
+
+    val query = parseSelect("""
+        PREFIX wgs84_pos: <http://www.w3.org/2003/01/geo/wgs84_pos#>
+        PREFIX geo: <http://www.opengis.net/ont/geosparql#> 
+            SELECT ?s ?def ?pol
+             WHERE {
+                ?s geo:asWKT ?pol.
+                ?s <http://dbcells.org/ontology/deforest2008> ?def.
+                ?s ?p ?o.
+                ?s geo:sfWithin ?o2.
+                ?o2 geo:sfWithin "BRA".
+            }
+        LIMIT 300000
+    """).get
+
+    val rs: Rdf#Solutions = endpoint.executeSelect(query).get
+
+    val cells = rs.iterator map { row =>
+      //row("s").get.as[Rdf#URI].get
+        //subString(0,nuber.indexOf(^))
+        val defor = row("def").get.toString()
+        //println (row)
+        //println (type(row))
+        
+        (row("s").get.toString(), "deforestation", defor.substring(0, defor.indexOf("^") ))
+    }
+    
+    val triples = new Triples (cells.toArray:_*)
+    //println (triples.groupBySubj().keys)
+    val mapCells = triples.groupBySubj()
+    println (mapCells("http://dbcells.org/onehalf/133640")("deforestation"))
+    
+   // val mapDef = triples.groupByPred()("deforestation")
+    
+
+  }
+}
+import org.w3.banana.jena.JenaModule
+object SPARQLExampleWithJena extends SPARQLExample with JenaModule
+
+
